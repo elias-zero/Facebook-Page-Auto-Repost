@@ -5,6 +5,7 @@ import requests
 import logging
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 
 # ----------------------------
@@ -12,7 +13,6 @@ from datetime import datetime
 # ----------------------------
 app = Flask(__name__)
 
-# إعداد logging لعرض الوقت والمستوى والرسالة
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -25,18 +25,14 @@ logging.basicConfig(
 EXCEL_FILE = "coupons.xlsx"    # ملف الإكسل مع قائمة الكوبونات
 STATE_FILE = "state.json"      # ملف JSON لحفظ آخر فهرس منشور
 
-# المتغيران يُحمَلان من environment variables على السيرفر
 PAGE_ACCESS_TOKEN = os.environ.get("FACEBOOK_PAGE_ACCESS_TOKEN")
 PAGE_ID = os.environ.get("FACEBOOK_PAGE_ID")
 
 # ----------------------------
 # دوال مساعدة
 # ----------------------------
-
 def load_coupons():
-    """
-    تحميل الإكسل وتحويله إلى قائمة قواميس
-    """
+    """تحميل الإكسل وتحويله إلى قائمة قواميس"""
     logging.info("🔄 Loading coupons from Excel")
     try:
         df = pd.read_excel(EXCEL_FILE)
@@ -59,16 +55,14 @@ def get_next_index(total):
             state = json.load(f)
         last = state.get("last_index", -1)
         next_idx = (last + 1) % total
-        logging.info(f"ℹ️ Next index calculated: {next_idx} (last was {last})")
+        logging.info(f"ℹ️ Next index: {next_idx} (last was {last})")
         return next_idx
     except Exception as e:
         logging.error(f"❌ Error reading state file: {e}")
         return 0
 
 def update_state(index):
-    """
-    تحديث ملف الحالة بالفهرس المطروح
-    """
+    """تحديث ملف الحالة بالفهرس الحالي"""
     try:
         with open(STATE_FILE, "w") as f:
             json.dump({"last_index": index}, f)
@@ -80,17 +74,17 @@ def update_state(index):
 # دالة النشر الرئيسية
 # ----------------------------
 def post_coupon():
-    logging.info("🚀 Starting post_coupon job")
+    logging.info("🚀 Running post_coupon job")
     coupons = load_coupons()
     if not coupons:
-        logging.warning("⚠️ No coupons to post")
+        logging.warning("⚠️ No coupons found")
         return
 
     idx = get_next_index(len(coupons))
     coupon = coupons[idx]
-    logging.info(f"ℹ️ Posting coupon at index {idx}: {coupon.get('title')}")
+    logging.info(f"ℹ️ Posting coupon #{idx + 1}: {coupon.get('title')}")
 
-    # تحضير الرسالة
+    # تحضير رسالة النشر
     message = (
         f"🎉 {coupon['title']}\n\n"
         f"🔥 {coupon['description']}\n\n"
@@ -102,7 +96,7 @@ def post_coupon():
         "https://www.discountcoupon.online"
     )
 
-    # نشر الصورة والنص عبر Facebook Graph API
+    # إرسال طلب إلى Facebook Graph API
     url = f"https://graph.facebook.com/{PAGE_ID}/photos"
     payload = {
         "url": coupon['image'],
@@ -118,21 +112,20 @@ def post_coupon():
         else:
             logging.error(f"❌ Facebook API error [{resp.status_code}]: {resp.text}")
     except Exception as e:
-        logging.error(f"❌ Exception during HTTP request: {e}")
+        logging.error(f"❌ HTTP request exception: {e}")
 
 # ----------------------------
-# جدولة المهمة
+# جدولة المهمة عند الدقيقة 0 من كل ساعة
 # ----------------------------
 scheduler = BackgroundScheduler()
-# هنا ننشر كل دقيقة، وتنفذ أول مرة فور الإقلاع
 scheduler.add_job(
     post_coupon,
-    trigger='interval',
-    minutes=1,
-    next_run_time=datetime.now()
+    trigger=CronTrigger(minute=0),      # الدقائق = 0 => في بداية كل ساعة
+    id="hourly_coupon_post",
+    replace_existing=True
 )
 scheduler.start()
-logging.info("✅ Scheduler started: posting every 1 minute")
+logging.info("✅ Scheduler started: posting at the top of every hour (minute=0)")
 
 # ----------------------------
 # نقطة تحقق حالة السيرفر (لـ UptimeRobot)
@@ -145,7 +138,6 @@ def health_check():
 # تشغيل التطبيق
 # ----------------------------
 if __name__ == "__main__":
-    # قراءة منفذ Render من متغير PORT أو 10000 كافتراضي
     port = int(os.environ.get("PORT", 10000))
     logging.info(f"🔌 Starting Flask on port {port}")
     app.run(host="0.0.0.0", port=port)
