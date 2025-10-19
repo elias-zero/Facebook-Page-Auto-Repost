@@ -1,0 +1,31 @@
+name: Send Telegram Coupon Every 5 Minutes
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # كل 5 دقائق
+  workflow_dispatch: {}    # تشغيل يدوي من واجهة GitHub
+
+permissions:
+  contents: write   # نحتاج صلاحية كتابة المحتوى لالتزام التغيير (commit & push)
+
+jobs:
+  send_coupon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true  # يستخدم GITHUB_TOKEN لدفع commit
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run send_and_increment.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python send_and_increment.py
